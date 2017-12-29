@@ -12,52 +12,40 @@ fn main() {
         width: 800,
         height: 600,
         fov: 90.0,
-        sphere: Sphere {
-            center: Point {
-                x: 0.0,
-                y: 0.0,
-                z: -5.0,
+        spheres: [
+            Sphere {
+                center: Point {
+                    x: 1.0,
+                    y: 0.0,
+                    z: -5.0,
+                },
+                radius: 1.0,
+                color: Color {
+                    red: 0.0,
+                    green: 1.0,
+                    blue: 0.0,
+                },
             },
-            radius: 1.0,
-            color: Color {
-                red: 0.0,
-                green: 1.0,
-                blue: 0.0,
-            },
-        },
+            Sphere {
+                center: Point {
+                    x: 3.0,
+                    y: 0.0,
+                    z: -5.0,
+                },
+                radius: 1.0,
+                color: Color {
+                    red: 1.0,
+                    green: 0.0,
+                    blue: 0.0,
+                },
+            }
+        ],
     };
 
     let image = render(&scene);
 
     let ref mut fout = File::create("test.png").unwrap();
     image.save(fout, image::PNG).unwrap();
-}
-
-
-#[test]
-fn test_can_render_scene() {
-    let scene = Scene {
-        width: 800,
-        height: 600,
-        fov: 90.0,
-        sphere: Sphere {
-            center: Point {
-                x: 0.0,
-                y: 0.0,
-                z: -5.0,
-            },
-            radius: 1.0,
-            color: Color {
-                red: 0.4,
-                green: 1.0,
-                blue: 0.4,
-            },
-        },
-    };
-
-    let img: DynamicImage = render(&scene);
-    assert_eq!(scene.width, img.width());
-    assert_eq!(scene.height, img.height());
 }
 
 
@@ -171,7 +159,7 @@ pub struct Scene {
     pub width: u32,
     pub height: u32,
     pub fov: f64,
-    pub sphere: Sphere,
+    pub spheres: [Sphere; 2],
 }
 
 
@@ -202,60 +190,32 @@ impl Ray {
 }
 
 
-//
-//pub fn create_prime(x: u32, y: u32, scene: &Scene) -> Ray {
-//    assert!(scene.width > scene.height);
-//    let fov_adjustment = (scene.fov.to_radians() / 2.0).tan();
-//    let aspect_ratio = (scene.width as f64) / (scene.height as f64);
-//
-//    let sensor_x = ((((x as f64 + 0.5) / scene.width as f64) * 2.0 - 1.0) * aspect_ratio) * fov_adjustment;
-//    let sensor_y = (1.0 - ((y as f64 + 0.5) / scene.height as f64) * 2.0) * fov_adjustment;
-//
-//    Ray {
-//        origin: Point::zero(),
-//        direction: Vector3 {
-//            x: sensor_x,
-//            y: sensor_y,
-//            z: -1.0,
-//        }
-//            .normalize(),
-//    }
-//}
-//pub fn create_prime(x: u32, y: u32, scene: &Scene) -> Ray {
-//    let sensor_x = ((x as f64 + 0.5) / scene.width as f64) * 2.0 - 1.0;
-//    let sensor_y = 1.0 - ((y as f64 + 0.5) / scene.height as f64) * 2.0;
-//
-//    Ray {
-//        origin: Point::zero(),
-//        direction: Vector3 {
-//            x: sensor_x,
-//            y: sensor_y,
-//            z: -1.0,
-//        }.normalize(),
-//    }
-//}
-
-
 pub trait Intersectable {
-    fn intersect(&self, ray: &Ray) -> bool;
+    fn intersect(&self, ray: &Ray) -> Option<f64>;
 }
 
 impl Intersectable for Sphere {
-    fn intersect(&self, ray: &Ray) -> bool {
-        //Create a line segment between the ray origin and the center of the sphere
-
+    fn intersect(&self, ray: &Ray) -> Option<f64> {
         let a = Point { x: self.center.x, y: self.center.y, z: self.center.z };
         let b = Point { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z };
 
         let l: Vector3 = a - b;
-//        let l: Vector3 = self.center - ray.origin;
-        //Use l as a hypotenuse and find the length of the adjacent side
-        let adj2 = l.dot(&ray.direction);
-        //Find the length-squared of the opposite side
-        //This is equivalent to (but faster than) (l.length() * l.length()) - (adj2 * adj2)
-        let d2 = l.dot(&l) - (adj2 * adj2);
-        //If that length-squared is less than radius squared, the ray intersects the sphere
-        d2 < (self.radius * self.radius)
+        let adj = l.dot(&ray.direction);
+        let d2 = l.dot(&l) - (adj * adj);
+        let radius2 = self.radius * self.radius;
+        if d2 > radius2 {
+            return None;
+        }
+        let thc = (radius2 - d2).sqrt();
+        let t0 = adj - thc;
+        let t1 = adj + thc;
+
+        if t0 < 0.0 && t1 < 0.0 {
+            return None;
+        }
+
+        let distance = if t0 < t1 { t0 } else { t1 };
+        Some(distance)
     }
 }
 
@@ -271,19 +231,102 @@ pub fn render(scene: &Scene) -> image::DynamicImage {
     let black = image::Rgba::from_channels(0, 0, 0, 0);
     for x in 0..scene.width {
         for y in 0..scene.height {
-            let ray = Ray::create_prime(x, y, scene);
-            if x == 0 && y == 0 {
-                println!("x : {0} y : {1} z : {2}", ray.origin.x, ray.origin.y, ray.origin.z);
-                println!("x : {0} y : {1} z : {2}", ray.direction.x, ray.direction.y, ray.direction.z);
-            }
-            if scene.sphere.intersect(&ray) {
+            let mut is_set: bool = false;
+            let mut shortest: f64 = 300000.0;
+            let mut count: usize = 0;
+
+            for s_count in 0..scene.spheres.len() {
+                let sphere: &Sphere = &scene.spheres[s_count];
+                let ray: Ray = Ray::create_prime(x, y, scene);
+                if x == 0 && y == 0 {
+                    println!("x : {0} y : {1} z : {2}", ray.origin.x, ray.origin.y, ray.origin.z);
+                    println!("x : {0} y : {1} z : {2}", ray.direction.x, ray.direction.y, ray.direction.z);
+                }
+                let a = sphere.intersect(&ray);
+                if a.is_some() { // todo : add the closest sphere with the value
 //                println!("intersects");
-                image.put_pixel(x, y, to_rgba(&scene.sphere.color))
+                    image.put_pixel(x, y, to_rgba(&sphere.color));
+                    is_set = true;
+                    if a.unwrap() < shortest {
+                        count = s_count;
+                        shortest = a.unwrap();
+                    }
+                }
+            }
+            if is_set {
+                let sphere: &Sphere = &scene.spheres[count];
+                image.put_pixel(x, y, to_rgba(&sphere.color));
             } else {
-//                println!("does not intersects");
                 image.put_pixel(x, y, black);
             }
         }
     }
     image
+}
+
+//
+//pub struct Intersection<'a> {
+//    pub distance: f64,
+//    pub object: &'a Sphere,
+//}
+//impl<'a> Intersection<'a> {
+//    pub fn new<'b>(distance: f64, object: &'b Sphere) -> Intersection<'b> {
+//        return Intersection();
+//    }
+//}
+//impl Scene {
+//    pub fn trace(&self, ray: &Ray) -> Option<Intersection> {
+//        self.spheres
+//            .iter()
+//            .filter_map(|s| s.intersect(ray).map(|d| Intersection::new(d, s)))
+//            .min_by(|i1, i2| i1.distance.partial_cmp(&i2.distance).unwrap())
+//    }
+//}
+
+
+pub struct Plane {
+    pub origin: Point,
+    pub normal: Vector3,
+    pub color: Color,
+}
+
+pub enum Element {
+    Sphere(Sphere),
+    Plane(Plane),
+}
+
+impl Element {
+    pub fn color(&self) -> &Color {
+        match *self {
+            Element::Sphere(ref s) => &s.color,
+            Element::Plane(ref p) => &p.color,
+        }
+    }
+}
+
+impl Intersectable for Element {
+    fn intersect(&self, ray: &Ray) -> Option<f64> {
+        match *self {
+            Element::Sphere(ref s) => s.intersect(ray),
+            Element::Plane(ref p) => p.intersect(ray),
+        }
+    }
+}
+
+impl Intersectable for Plane {
+    fn intersect(&self, ray: &Ray) -> Option<f64> {
+        let normal = &self.normal;
+        let denom = normal.dot(&ray.direction);
+
+        if denom > 1e-6 {
+            let v = Point { x: self.origin.x, y: self.origin.y, z: self.origin.z }
+                -
+                Point { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z };
+            let distance = v.dot(&normal) / denom;
+            if distance >= 0.0 {
+                return Some(distance);
+            }
+        }
+        None
+    }
 }
