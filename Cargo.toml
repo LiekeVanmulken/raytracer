@@ -1,0 +1,8 @@
+[package]
+name = "untitled"
+version = "0.1.0"
+authors = ["Wouter Vanmulken <woutervanmulken@msn.com>"]
+
+[dependencies]
+image = "0.18.0"
+cgmath = "0.15.0"
