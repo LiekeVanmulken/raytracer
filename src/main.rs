@@ -6,14 +6,43 @@ use std::ops::Sub;
 use image::{Rgba, GenericImage, Pixel};
 use std::fs::File;
 
+mod data;
+mod utils;
+
+use data::data::*;
+
+//use utils::utils::*;
+pub fn to_rgba(color: &Color) -> Rgba<u8> {
+    return image::Rgba::from_channels((color.red * 255.0) as u8,
+                                      (color.green * 255.0) as u8,
+                                      (color.blue * 255.0) as u8, 255);
+}
+
 
 fn main() {
     let scene = Scene {
         width: 800,
         height: 600,
         fov: 90.0,
-        spheres: [
-            Sphere {
+        elements: vec![
+            Element::Plane(Plane {
+                origin: Point {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                normal: Vector3 {
+                    x: 0.0,
+                    y: -1.0,
+                    z: 0.0,
+                },
+                color: Color {
+                    red: 0.5,
+                    green: 0.5,
+                    blue: 0.5,
+                },
+            }),
+            Element::Sphere(Sphere {
                 center: Point {
                     x: 1.0,
                     y: 0.0,
@@ -25,8 +54,8 @@ fn main() {
                     green: 1.0,
                     blue: 0.0,
                 },
-            },
-            Sphere {
+            }),
+            Element::Sphere(Sphere {
                 center: Point {
                     x: 3.0,
                     y: 0.0,
@@ -38,8 +67,21 @@ fn main() {
                     green: 0.0,
                     blue: 0.0,
                 },
-            }
+            })
         ],
+        light: Light {
+            direction: Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            color: Color {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+            },
+            intensity: 0.0,
+        },
     };
 
     let image = render(&scene);
@@ -48,12 +90,6 @@ fn main() {
     image.save(fout, image::PNG).unwrap();
 }
 
-
-pub struct Vector3 {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-}
 
 impl Vector3 {
     pub fn zero() -> Vector3 {
@@ -126,11 +162,6 @@ impl Sub<Point> for Point {
     }
 }
 
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-}
 
 impl Point {
     pub fn zero() -> Point {
@@ -142,31 +173,6 @@ impl Point {
     }
 }
 
-pub struct Color {
-    pub red: f32,
-    pub green: f32,
-    pub blue: f32,
-}
-
-
-pub struct Sphere {
-    pub center: Point,
-    pub radius: f64,
-    pub color: Color,
-}
-
-pub struct Scene {
-    pub width: u32,
-    pub height: u32,
-    pub fov: f64,
-    pub spheres: [Sphere; 2],
-}
-
-
-pub struct Ray {
-    pub origin: Point,
-    pub direction: Vector3,
-}
 
 impl Ray {
     pub fn create_prime(x: u32, y: u32, scene: &Scene) -> Ray {
@@ -189,10 +195,6 @@ impl Ray {
     }
 }
 
-
-pub trait Intersectable {
-    fn intersect(&self, ray: &Ray) -> Option<f64>;
-}
 
 impl Intersectable for Sphere {
     fn intersect(&self, ray: &Ray) -> Option<f64> {
@@ -218,12 +220,16 @@ impl Intersectable for Sphere {
         Some(distance)
     }
 }
-
-pub fn to_rgba(color: &Color) -> Rgba<u8> {
-    return Rgba::from_channels((color.red * 255.0) as u8,
-                               (color.green * 255.0) as u8,
-                               (color.blue * 255.0) as u8, 255);
-}
+//impl Sphere{
+//    fn surface_normal(&self, hit_point: &Point) -> Vector3 {
+//        (*hit_point - self.center).normalize()
+//    }
+//}
+//impl Plane{
+//    fn surface_normal(&self, _: &Point) -> Vector3 {
+//        -self.normal
+//    }
+//}
 
 
 pub fn render(scene: &Scene) -> image::DynamicImage {
@@ -235,8 +241,8 @@ pub fn render(scene: &Scene) -> image::DynamicImage {
             let mut shortest: f64 = 300000.0;
             let mut count: usize = 0;
 
-            for s_count in 0..scene.spheres.len() {
-                let sphere: &Sphere = &scene.spheres[s_count];
+            for s_count in 0..scene.elements.len() {
+                let sphere = &scene.elements[s_count];
                 let ray: Ray = Ray::create_prime(x, y, scene);
                 if x == 0 && y == 0 {
                     println!("x : {0} y : {1} z : {2}", ray.origin.x, ray.origin.y, ray.origin.z);
@@ -245,7 +251,7 @@ pub fn render(scene: &Scene) -> image::DynamicImage {
                 let a = sphere.intersect(&ray);
                 if a.is_some() { // todo : add the closest sphere with the value
 //                println!("intersects");
-                    image.put_pixel(x, y, to_rgba(&sphere.color));
+                    image.put_pixel(x, y, to_rgba(&sphere.color()));
                     is_set = true;
                     if a.unwrap() < shortest {
                         count = s_count;
@@ -254,8 +260,8 @@ pub fn render(scene: &Scene) -> image::DynamicImage {
                 }
             }
             if is_set {
-                let sphere: &Sphere = &scene.spheres[count];
-                image.put_pixel(x, y, to_rgba(&sphere.color));
+                let sphere = &scene.elements[count];
+                image.put_pixel(x, y, to_rgba(&sphere.color()));
             } else {
                 image.put_pixel(x, y, black);
             }
@@ -263,37 +269,36 @@ pub fn render(scene: &Scene) -> image::DynamicImage {
     }
     image
 }
-
 //
 //pub struct Intersection<'a> {
 //    pub distance: f64,
-//    pub object: &'a Sphere,
+//    pub object: &'a Element,
 //}
+//
 //impl<'a> Intersection<'a> {
-//    pub fn new<'b>(distance: f64, object: &'b Sphere) -> Intersection<'b> {
-//        return Intersection();
+//    pub fn new<'b>(distance: f64, element: &'b Element) -> Intersection<'b> {
+//        if !distance.is_finite() {
+//            panic!("Intersection must have a finite distance.");
+//        }
+//
+//        Intersection {
+//            distance: distance,
+//            object: element,
+//        }
 //    }
 //}
+//
 //impl Scene {
 //    pub fn trace(&self, ray: &Ray) -> Option<Intersection> {
-//        self.spheres
+//        self.elements
 //            .iter()
-//            .filter_map(|s| s.intersect(ray).map(|d| Intersection::new(d, s)))
-//            .min_by(|i1, i2| i1.distance.partial_cmp(&i2.distance).unwrap())
+//            .filter_map(|s| s.intersect(ray)
+//                .map(|d| Intersection::new(d, s)))
+//            .min_by(|i1, i2| i1.distance.partial_cmp(&i2.distance)
+//                .unwrap())
 //    }
 //}
 
-
-pub struct Plane {
-    pub origin: Point,
-    pub normal: Vector3,
-    pub color: Color,
-}
-
-pub enum Element {
-    Sphere(Sphere),
-    Plane(Plane),
-}
 
 impl Element {
     pub fn color(&self) -> &Color {
@@ -319,10 +324,20 @@ impl Intersectable for Plane {
         let denom = normal.dot(&ray.direction);
 
         if denom > 1e-6 {
-            let v = Point { x: self.origin.x, y: self.origin.y, z: self.origin.z }
-                -
-                Point { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z };
+            let v = Vector3 {
+                x: self.origin.x - ray.origin.x,
+                y: self.origin.y - ray.origin.y,
+                z: self.origin.z - ray.origin.z,
+            };
+            println!("X : {}, Y : {}, Z : {}", ray.origin.x, ray.origin.y, ray.origin.z);
+            println!("X : {}, Y : {}, Z : {}", self.origin.x, self.origin.y, self.origin.z);
+            println!("X : {}, Y : {}, Z : {}", v.x, v.y, v.z);
+
+//            let v = Point { x: self.origin.x, y: self.origin.y, z: self.origin.z }
+//                -
+//                Point { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z };
             let distance = v.dot(&normal) / denom;
+            println!("{}", distance);
             if distance >= 0.0 {
                 return Some(distance);
             }
@@ -330,3 +345,5 @@ impl Intersectable for Plane {
         None
     }
 }
+
+
